@@ -24,17 +24,6 @@ jobs:
             -H "Content-Type: application/json" \
             -u "${SN_USERNAME}:${SN_PASSWORD}" \
             --data '{
-              "caller_id": "system",
-              "contact_type": "monitoring",
-              "category": "inquiry",
-              "subcategory": "help",
-
               "short_description": "AWS RDS DOWN | prod-payment-db-01 | Connection Timeout",
-
-              "description": "Datadog Alert Triggered\n\nPlatform: AWS\nService: Payment Processing\nCI: prod-payment-db-01\nRegion: us-east-1\n\nIssue:\n- RDS connection timeout\n- CPU usage critical\n\nAction Required:\nInvestigate database connectivity immediately.",
-
-              "impact": "1",
-              "urgency": "1",
-              "priority": "1",
-              "state": "1"
+              "description": "Datadog Alert Triggered\n\nPlatform: AWS\nService: Payment Processing\nCI: prod-payment-db-01\nRegion: us-east-1\n\nIssue:\n- RDS connection timeout\n- CPU usage critical\n\nAction Required:\nInvestigate database connectivity immediately."
             }'
