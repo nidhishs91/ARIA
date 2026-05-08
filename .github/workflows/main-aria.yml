@@ -11,14 +11,12 @@ jobs:
 
     steps:
 
-      # ✅ Step 1: Simulate pipeline work
       - name: Run Application
         id: run_app
         run: |
           echo "Running app..."
-          exit 1   # ❌ simulate failure (later remove)
+          exit 1
 
-      # ✅ Step 2: If FAILED → create ARIA Case
       - name: Create ARIA Case (Failure)
         if: failure()
         env:
@@ -33,13 +31,12 @@ jobs:
             -u "${SN_USERNAME}:${SN_PASSWORD}" \
             --data '{
               "u_short_description": "Pipeline Failed",
-              "u_situation_details": "Build failed in GitHub Actions",
+              "u_situation_details": "Build failed",
               "u_case_state": "failed",
               "u_decision": "auto heal",
-              "u_pipelineid":"'${{ github.run_id }}'"
+              "u_pipelineid": "'${{ github.run_id }}'"
             }'
 
-      # ✅ Step 3: If SUCCESS → close case
       - name: Close ARIA Case (Success)
         if: success()
         env:
@@ -47,4 +44,11 @@ jobs:
           SN_USERNAME: ${{ secrets.SN_USERNAME }}
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
         run: |
-          echo "Pipeline successful - should close case"
+          curl -X PATCH \
+            "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_pipelineid=${{ github.run_id }}" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            -u "${SN_USERNAME}:${SN_PASSWORD}" \
+            --data '{
+              "u_case_state": "closed"
+            }'
