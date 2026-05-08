@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   aria-flow:
@@ -11,12 +12,14 @@ jobs:
 
     steps:
 
+      # ✅ Step 1: Run Application (SUCCESS for test)
       - name: Run Application
         id: run_app
         run: |
           echo "Running app..."
           exit 0
 
+      # ✅ Step 2: If FAILED → create ARIA Case
       - name: Create ARIA Case (Failure)
         if: failure()
         env:
@@ -37,6 +40,7 @@ jobs:
               "u_pipelineid": "'${{ github.run_id }}'"
             }'
 
+      # ✅ Step 3: If SUCCESS → close SAME ARIA case
       - name: Close ARIA Case (Success)
         if: success()
         env:
@@ -44,8 +48,19 @@ jobs:
           SN_USERNAME: ${{ secrets.SN_USERNAME }}
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
         run: |
+          echo "Fetching ARIA Case sys_id"
+
+          RESPONSE=$(curl -s -u "${SN_USERNAME}:${SN_PASSWORD}" \
+          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_pipelineid=${{ github.run_id }}&sysparm_limit=1")
+
+          echo "Response: $RESPONSE"
+
+          SYS_ID=$(echo $RESPONSE | jq -r '.result[0].sys_id')
+
+          echo "Updating ARIA Case: $SYS_ID"
+
           curl -X PATCH \
-            "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_pipelineid=${{ github.run_id }}" \
+            "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$SYS_ID" \
             -H "Accept: application/json" \
             -H "Content-Type: application/json" \
             -u "${SN_USERNAME}:${SN_PASSWORD}" \
