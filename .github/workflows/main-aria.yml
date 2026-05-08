@@ -35,7 +35,8 @@ jobs:
               "u_short_description": "Pipeline Failed",
               "u_situation_details": "Build failed in GitHub Actions",
               "u_case_state": "failed",
-              "u_decision": "auto heal"
+              "u_decision": "auto heal",
+              "u_pipelineid":"'${{ github.run_id }}'"
             }'
 
       # ✅ Step 3: If SUCCESS → close case
