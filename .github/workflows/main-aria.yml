@@ -125,8 +125,7 @@ jobs:
           echo "Fetching existing ARIA Case..."
 
           RESPONSE=$(curl -s -u "${SN_USERNAME}:${SN_PASSWORD}" \
-          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_pipelineid=ARIA_MAIN_PIPELINE^u_case_state=work in progress&sysparm_limit=1")
-
+          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_pipelineid=ARIA_MAIN_PIPELINE%5Eu_case_state=work%20in%20progress&sysparm_limit=1")
           echo "Response: $RESPONSE"
 
           SYS_ID=$(echo $RESPONSE | jq -r '.result[0].sys_id')
