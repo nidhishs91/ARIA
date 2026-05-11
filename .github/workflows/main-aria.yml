@@ -87,7 +87,7 @@ jobs:
         id: run_app
         run: |
           echo "Running app..."
-          exit 0   # ❌ fail (change to exit 0 when testing success)
+          exit 1   # ❌ fail (change to exit 0 when testing success)
 
       # ✅ Step 2: If FAILED → Create ARIA Case
       - name: Create ARIA Case (Failure)
