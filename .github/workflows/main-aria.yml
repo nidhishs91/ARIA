@@ -1,3 +1,73 @@
+# name: ARIA Pipeline
+
+# on:
+#   push:
+#     branches:
+#       - main
+#   workflow_dispatch:
+
+# jobs:
+#   aria-flow:
+#     runs-on: ubuntu-latest
+
+#     steps:
+
+#       # ✅ Step 1: Run Application (SUCCESS for test)
+#       - name: Run Application
+#         id: run_app
+#         run: |
+#           echo "Running app..."
+#           exit 1
+
+#       # ✅ Step 2: If FAILED → create ARIA Case
+#       - name: Create ARIA Case (Failure)
+#         if: failure()
+#         env:
+#           SN_INSTANCE: ${{ secrets.SN_INSTANCE }}
+#           SN_USERNAME: ${{ secrets.SN_USERNAME }}
+#           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
+#         run: |
+#           curl -X POST \
+#             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case" \
+#             -H "Accept: application/json" \
+#             -H "Content-Type: application/json" \
+#             -u "${SN_USERNAME}:${SN_PASSWORD}" \
+#             --data '{
+#               "u_short_description": "Pipeline Failed",
+#               "u_situation_details": "Build failed",
+#               "u_case_state": "failed",
+#               "u_decision": "auto heal",
+#               "u_pipelineid": "'${{ github.run_id }}'"
+#             }'
+
+#       # ✅ Step 3: If SUCCESS → close SAME ARIA case
+#       - name: Close ARIA Case (Success)
+#         if: success()
+#         env:
+#           SN_INSTANCE: ${{ secrets.SN_INSTANCE }}
+#           SN_USERNAME: ${{ secrets.SN_USERNAME }}
+#           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
+#         run: |
+#           echo "Fetching ARIA Case sys_id"
+
+#           RESPONSE=$(curl -s -u "${SN_USERNAME}:${SN_PASSWORD}" \
+#           "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_pipelineid=${{ github.run_id }}&sysparm_limit=1")
+
+#           echo "Response: $RESPONSE"
+
+#           SYS_ID=$(echo $RESPONSE | jq -r '.result[0].sys_id')
+
+#           echo "Updating ARIA Case: $SYS_ID"
+
+#           curl -X PATCH \
+#             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$SYS_ID" \
+#             -H "Accept: application/json" \
+#             -H "Content-Type: application/json" \
+#             -u "${SN_USERNAME}:${SN_PASSWORD}" \
+#             --data '{
+#               "u_case_state": "closed"
+#             }'
+
 name: ARIA Pipeline
 
 on:
@@ -12,14 +82,14 @@ jobs:
 
     steps:
 
-      # ✅ Step 1: Run Application (SUCCESS for test)
+      # ✅ Step 1: Run Application
       - name: Run Application
         id: run_app
         run: |
           echo "Running app..."
-          exit 1
+          exit 1   # ❌ fail (change to exit 0 when testing success)
 
-      # ✅ Step 2: If FAILED → create ARIA Case
+      # ✅ Step 2: If FAILED → Create ARIA Case
       - name: Create ARIA Case (Failure)
         if: failure()
         env:
@@ -35,12 +105,11 @@ jobs:
             --data '{
               "u_short_description": "Pipeline Failed",
               "u_situation_details": "Build failed",
-              "u_case_state": "failed",
-              "u_decision": "auto heal",
-              "u_pipelineid": "'${{ github.run_id }}'"
+              "u_case_state": "work in progress",
+              "u_pipelineid": "ARIA_MAIN_PIPELINE"
             }'
 
-      # ✅ Step 3: If SUCCESS → close SAME ARIA case
+      # ✅ Step 3: If SUCCESS → Close SAME ARIA Case
       - name: Close ARIA Case (Success)
         if: success()
         env:
@@ -48,22 +117,29 @@ jobs:
           SN_USERNAME: ${{ secrets.SN_USERNAME }}
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
         run: |
-          echo "Fetching ARIA Case sys_id"
+          echo "Fetching existing ARIA Case..."
 
           RESPONSE=$(curl -s -u "${SN_USERNAME}:${SN_PASSWORD}" \
-          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_pipelineid=${{ github.run_id }}&sysparm_limit=1")
+          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_pipelineid=ARIA_MAIN_PIPELINE^u_case_state=work in progress&sysparm_limit=1")
 
           echo "Response: $RESPONSE"
 
           SYS_ID=$(echo $RESPONSE | jq -r '.result[0].sys_id')
 
-          echo "Updating ARIA Case: $SYS_ID"
+          echo "Case sys_id: $SYS_ID"
 
-          curl -X PATCH \
-            "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$SYS_ID" \
-            -H "Accept: application/json" \
-            -H "Content-Type: application/json" \
-            -u "${SN_USERNAME}:${SN_PASSWORD}" \
-            --data '{
-              "u_case_state": "closed"
-            }'
+          if [ "$SYS_ID" != "null" ]; then
+            echo "Closing ARIA Case..."
+
+            curl -X PATCH \
+              "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$SYS_ID" \
+              -H "Accept: application/json" \
+              -H "Content-Type: application/json" \
+              -u "${SN_USERNAME}:${SN_PASSWORD}" \
+              --data '{
+                "u_case_state": "closed",
+                "u_decision": "manual heal"
+              }'
+          else
+            echo "No active ARIA case found."
+          fi
