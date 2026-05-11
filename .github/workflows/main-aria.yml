@@ -103,7 +103,7 @@ jobs:
         id: run_app
         run: |
           echo "Running app..."
-          exit 1   # ❌ FAIL (change to exit 0 to test success)
+          exit 0   # ❌ FAIL (change to exit 0 to test success)
 
       # ✅ Step 2: If FAILED → Create Case + Signal
       - name: Create ARIA Case + Signal (Failure)
