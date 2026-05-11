@@ -92,18 +92,19 @@ jobs:
 
     steps:
 
-      # ✅ Step 0: Install jq (required)
-      - name: Install jq
+      # ✅ Step 0: Install dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y jq
+          pip install sentry-sdk
 
-      # ✅ Step 1: Run Application
+      # ✅ Step 1: Run Application (this will trigger Sentry)
       - name: Run Application
         id: run_app
         run: |
-          echo "Running app..."
-          exit 0   # ❌ FAIL (change to exit 0 to test success)
+          echo "Running app with Sentry..."
+          python app.py
 
       # ✅ Step 2: If FAILED → Create Case + Signal
       - name: Create ARIA Case + Signal (Failure)
@@ -143,8 +144,8 @@ jobs:
             -u "${SN_USERNAME}:${SN_PASSWORD}" \
             --data "{
               \"u_case\": \"$CASE_SYS_ID\",
-              \"u_signal_source\": \"GitHub Actions\",
-              \"u_signal_type\": \"pipeline failure\",
+              \"u_signal_source\": \"GitHub + Sentry\",
+              \"u_signal_type\": \"application error\",
               \"u_external_id\": \"${{ github.run_id }}\",
               \"u_status\": \"active\"
             }"
@@ -187,8 +188,6 @@ jobs:
 
             SIGNAL_RESPONSE=$(curl -s -u "${SN_USERNAME}:${SN_PASSWORD}" \
             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source?sysparm_query=u_case=$SYS_ID^u_status=active&sysparm_limit=1")
-
-            echo "Signal response: $SIGNAL_RESPONSE"
 
             SIGNAL_SYS_ID=$(echo "$SIGNAL_RESPONSE" | jq -r '.result[0].sys_id // empty')
 
