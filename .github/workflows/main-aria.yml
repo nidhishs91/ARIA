@@ -351,7 +351,7 @@ jobs:
 
       # ✅ 4. Get Sentry Issue ID
       - name: Get Sentry Issue ID
-        if: steps.run_app.outcome == 'failure'
+        if: steps.run_app.outputs.exit_code != '0'
         id: sentry_issue
         env:
           SENTRY_TOKEN: ${{ secrets.SENTRY_TOKEN }}
@@ -385,7 +385,7 @@ jobs:
 
       # ✅ 5. Create ARIA Case + Signal
       - name: Create ARIA Case + Signal
-        if: steps.run_app.outcome == 'failure'
+        if: steps.run_app.outputs.exit_code != '0'
         env:
           ERROR_MSG: ${{ steps.run_app.outputs.error }}
           ISSUE_ID: ${{ steps.sentry_issue.outputs.issue_id }}
