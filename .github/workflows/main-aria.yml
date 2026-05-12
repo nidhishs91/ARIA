@@ -390,7 +390,7 @@ jobs:
 
       # ✅ Step 5: If SUCCESS → Close Case + Resolve Signal
       - name: Close ARIA Case + Resolve Signal
-        if: success()
+        if: steps.run_app.outcome == 'success'
         env:
           SN_INSTANCE: ${{ secrets.SN_INSTANCE }}
           SN_USERNAME: ${{ secrets.SN_USERNAME }}
