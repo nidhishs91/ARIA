@@ -24,4 +24,4 @@ try:
 except Exception as e:
     event_id = sentry_sdk.capture_exception(e)
     print("SENTRY_EVENT_ID:", event_id)
-    
+    raise
