@@ -149,7 +149,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-     
       # ✅ Step 1: Checkout repo
       - name: Checkout code
         uses: actions/checkout@v4
@@ -176,17 +175,15 @@ jobs:
           OUTPUT=$(cat /tmp/app_output.txt)
           echo "$OUTPUT"
 
-          # Store output to GITHUB_OUTPUT
+          # Store output
           {
             echo "error<<EOF"
             echo "$OUTPUT"
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
-          # Store exit code
           echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
 
-          # Exit with captured code
           exit $EXIT_CODE
 
       # ✅ Step 4: If FAILED → Create Case + Signal
@@ -199,13 +196,10 @@ jobs:
           SN_USERNAME: ${{ secrets.SN_USERNAME }}
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
         run: |
-
           echo "=== Captured Error ==="
           echo "$ERROR_MSG"
           echo "Exit Code: $EXIT_CODE"
           echo "======================="
-
-          echo "Creating ARIA Case..."
 
           CASE_RESPONSE=$(curl -s -X POST \
             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case" \
@@ -223,13 +217,10 @@ jobs:
 
           CASE_SYS_ID=$(echo "$CASE_RESPONSE" | jq -r '.result.sys_id // empty')
 
-          if [ -z "$CASE_SYS_ID" ] || [ "$CASE_SYS_ID" == "null" ]; then
-            echo "ERROR: Failed to create case. Response: $CASE_RESPONSE"
+          if [ -z "$CASE_SYS_ID" ] || [ "$CASE_SYS_ID" = "null" ]; then
+            echo "ERROR: Case creation failed"
             exit 1
           fi
-
-          echo "Case sys_id: $CASE_SYS_ID"
-          echo "Creating Signal..."
 
           SIGNAL_RESPONSE=$(curl -s -X POST \
             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source" \
@@ -242,12 +233,12 @@ jobs:
               \"u_signal_type\": \"pipeline failure\",
               \"u_external_id\": \"${{ github.run_id }}\",
               \"u_status\": \"active\",
-              \"u_error_details\": $(echo "$ERROR_MSG" | jq -Rs .)
+              \"u_pas\": $(echo "$ERROR_MSG" | jq -Rs .)
             }")
 
           echo "Signal Response: $SIGNAL_RESPONSE"
 
-      # Step 5: If SUCCESS → Close Case + Resolve Signal
+      # ✅ Step 5: If SUCCESS → Close Case + Resolve Signal
       - name: Close ARIA Case + Resolve Signal
         if: success()
         env:
@@ -255,19 +246,18 @@ jobs:
           SN_USERNAME: ${{ secrets.SN_USERNAME }}
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
         run: |
-
-          echo "Fetching existing ARIA Case..."
+          echo "Fetching ARIA Case..."
 
           RESPONSE=$(curl -s -u "${SN_USERNAME}:${SN_PASSWORD}" \
-          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_pipelineid=ARIA_MAIN_PIPELINE^u_case_state=work%20in%20progress&sysparm_limit=1")
+            "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_pipelineid=ARIA_MAIN_PIPELINE^u_case_state=work in progress&sysparm_limit=1")
 
-          echo "Fetch Response: $RESPONSE"
+          echo "Case Fetch Response: $RESPONSE"
 
           SYS_ID=$(echo "$RESPONSE" | jq -r '.result[0].sys_id // empty')
 
           if [ -n "$SYS_ID" ] && [ "$SYS_ID" != "null" ]; then
 
-            echo "Closing ARIA Case: $SYS_ID"
+            echo "Closing Case: $SYS_ID"
 
             curl -X PATCH \
               "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$SYS_ID" \
@@ -279,8 +269,33 @@ jobs:
                 "u_decision": "manual heal"
               }'
 
-            echo "Case closed successfully"
+            echo "Fetching Signal..."
+
+            SIGNAL_RESPONSE=$(curl -s -u "${SN_USERNAME}:${SN_PASSWORD}" \
+              "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source?sysparm_query=u_case=$SYS_ID^u_status=active&sysparm_limit=1")
+
+            echo "Signal Fetch Response: $SIGNAL_RESPONSE"
+
+            SIGNAL_SYS_ID=$(echo "$SIGNAL_RESPONSE" | jq -r '.result[0].sys_id // empty')
+
+            if [ -n "$SIGNAL_SYS_ID" ] && [ "$SIGNAL_SYS_ID" != "null" ]; then
+
+              echo "Resolving Signal: $SIGNAL_SYS_ID"
+
+              curl -X PATCH \
+                "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source/$SIGNAL_SYS_ID" \
+                -H "Accept: application/json" \
+                -H "Content-Type: application/json" \
+                -u "${SN_USERNAME}:${SN_PASSWORD}" \
+                --data '{
+                  "u_status": "resolved"
+                }'
+
+              echo "Signal resolved ✅"
+            else
+              echo "No active signal found"
+            fi
 
           else
-            echo "No active ARIA case found to close"
+            echo "No active ARIA case found"
           fi
