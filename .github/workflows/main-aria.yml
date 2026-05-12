@@ -335,7 +335,6 @@ jobs:
 
           echo "$OUTPUT"
 
-          # ✅ Extract SENTRY_EVENT_ID printed by Python
           EVENT_ID=$(echo "$OUTPUT" | grep "SENTRY_EVENT_ID" | awk '{print $2}')
 
           echo "Captured Event ID: $EVENT_ID"
@@ -350,6 +349,7 @@ jobs:
 
           exit $EXIT_CODE
 
+      # ✅ 4. Get Sentry Issue ID
       - name: Get Sentry Issue ID
         if: steps.run_app.outcome == 'failure'
         id: sentry_issue
@@ -363,6 +363,8 @@ jobs:
             echo "No Sentry Event ID found."
             exit 1
           fi
+
+          echo "DEBUG: Using Event ID: $EVENT_ID"
 
           ISSUE_RESPONSE=$(curl -s \
             -H "Authorization: Bearer $SENTRY_TOKEN" \
@@ -381,7 +383,7 @@ jobs:
 
           echo "issue_id=$ISSUE_ID" >> $GITHUB_OUTPUT
 
-      # ✅ 5. Create ARIA Case + Signal in ServiceNow
+      # ✅ 5. Create ARIA Case + Signal
       - name: Create ARIA Case + Signal
         if: steps.run_app.outcome == 'failure'
         env:
@@ -391,10 +393,7 @@ jobs:
           SN_USERNAME: ${{ secrets.SN_USERNAME }}
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
         run: |
-
           SAFE_ERROR=$(echo "$ERROR_MSG" | jq -Rs .)
-
-          echo "Creating ARIA Case..."
 
           CASE_RESPONSE=$(curl -s -X POST \
             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case" \
@@ -408,8 +407,6 @@ jobs:
               "u_pipelineid": "ARIA_MAIN_PIPELINE"
             }')
 
-          echo "Case Response: $CASE_RESPONSE"
-
           CASE_SYS_ID=$(echo "$CASE_RESPONSE" | jq -r '.result.sys_id')
 
           if [ -z "$CASE_SYS_ID" ] || [ "$CASE_SYS_ID" = "null" ]; then
@@ -417,9 +414,7 @@ jobs:
             exit 1
           fi
 
-          echo "Creating ARIA Signal..."
-
-          SIGNAL_RESPONSE=$(curl -s -X POST \
+          curl -s -X POST \
             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source" \
             -H "Accept: application/json" \
             -H "Content-Type: application/json" \
@@ -432,10 +427,9 @@ jobs:
               \"u_status\": \"active\",
               \"u_error\": $SAFE_ERROR,
               \"u_sentry_issue_id\": \"$ISSUE_ID\"
-            }")
+            }"
 
-          echo "Signal Response: $SIGNAL_RESPONSE"
-
+      # ✅ 6. Close Case on Success
       - name: Close ARIA Case + Resolve Signal
         if: steps.run_app.outcome == 'success'
         env:
