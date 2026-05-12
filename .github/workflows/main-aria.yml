@@ -350,7 +350,6 @@ jobs:
 
           exit $EXIT_CODE
 
-      # ✅ 4. Convert Event → Numeric Issue ID
       - name: Get Sentry Issue ID
         if: steps.run_app.outcome == 'failure'
         id: sentry_issue
@@ -358,6 +357,7 @@ jobs:
           SENTRY_TOKEN: ${{ secrets.SENTRY_TOKEN }}
         run: |
           EVENT_ID="${{ steps.run_app.outputs.event_id }}"
+          ORG_SLUG="demo1-i6"
 
           if [ -z "$EVENT_ID" ]; then
             echo "No Sentry Event ID found."
@@ -366,13 +366,13 @@ jobs:
 
           ISSUE_RESPONSE=$(curl -s \
             -H "Authorization: Bearer $SENTRY_TOKEN" \
-            "https://us.sentry.io/api/0/events/$EVENT_ID/")
+            "https://us.sentry.io/api/0/organizations/$ORG_SLUG/events/$EVENT_ID/")
 
           echo "Issue API Response: $ISSUE_RESPONSE"
 
-          ISSUE_ID=$(echo $ISSUE_RESPONSE | jq -r '.groupID')
+          ISSUE_ID=$(echo "$ISSUE_RESPONSE" | jq -r '.groupID // empty')
 
-          if [ -z "$ISSUE_ID" ] || [ "$ISSUE_ID" = "null" ]; then
+          if [ -z "$ISSUE_ID" ]; then
             echo "Failed to retrieve issue ID from Sentry."
             exit 1
           fi
