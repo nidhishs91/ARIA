@@ -559,7 +559,7 @@ jobs:
 
           exit 1
 
-      # ✅ 5 Create OR Update Case (FAIL)
+      # ✅ 5 Create / Update ARIA Case (FAIL)
       - name: Create or Update ARIA Case
         if: steps.run_app.outputs.exit_code != '0'
         env:
@@ -571,12 +571,9 @@ jobs:
         run: |
 
           SAFE_ERROR=$(echo "$ERROR_MSG" | jq -Rs .)
-
           CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
 
-          # ✅ FIXED CORRELATION ID (IMPORTANT)
           CORRELATION_ID="${{ github.workflow }}-${{ github.ref_name }}"
-
           PIPELINE_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           echo "Checking existing case..."
@@ -584,11 +581,13 @@ jobs:
           EXISTING=$(curl -s -u "${SN_USERNAME}:${SN_PASSWORD}" \
           "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID^u_case_state=work%20in%20progress&sysparm_limit=1")
 
+          echo "Raw Response: $EXISTING"
+
           SYS_ID=$(echo "$EXISTING" | jq -r '.result[0].sys_id // empty')
 
           if [ -n "$SYS_ID" ]; then
 
-            echo "✅ Updating existing case"
+            echo "✅ Updating existing case: $SYS_ID"
 
             curl -X PATCH \
               "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$SYS_ID" \
@@ -600,7 +599,7 @@ jobs:
 
           else
 
-            echo "🚀 Creating new case"
+            echo "🚀 Creating new case..."
 
             CASE_RESPONSE=$(curl -s -X POST \
               "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case" \
@@ -645,11 +644,12 @@ jobs:
         run: |
 
           CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
-
           CORRELATION_ID="${{ github.workflow }}-${{ github.ref_name }}"
 
           RESPONSE=$(curl -s -u "${SN_USERNAME}:${SN_PASSWORD}" \
           "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID^u_case_state=work%20in%20progress&sysparm_limit=1")
+
+          echo "Raw Response: $RESPONSE"
 
           SYS_ID=$(echo "$RESPONSE" | jq -r '.result[0].sys_id // empty')
 
