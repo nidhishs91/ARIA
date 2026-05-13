@@ -335,7 +335,8 @@ jobs:
 
           echo "$OUTPUT"
 
-          EVENT_ID=$(echo "$OUTPUT" | grep "SENTRY_EVENT_ID" | awk '{print $2}')
+          # ✅ FIX: reliable event extraction
+          EVENT_ID=$(echo "$OUTPUT" | grep "Captured Event ID:" | awk '{print $4}')
 
           echo "Captured Event ID: $EVENT_ID"
 
@@ -349,13 +350,15 @@ jobs:
 
           exit $EXIT_CODE
 
-      # ✅ 4. Get Sentry Issue ID (PROJECT-SCOPED ✅)
+      # ✅ 4. Get Sentry Issue ID
       - name: Get Sentry Issue ID
         if: steps.run_app.outputs.exit_code != '0'
         id: sentry_issue
         env:
           SENTRY_TOKEN: ${{ secrets.SENTRY_TOKEN }}
         run: |
+          echo "Token length: ${#SENTRY_TOKEN}"
+
           EVENT_ID="${{ steps.run_app.outputs.event_id }}"
           ORG_SLUG="demo1-i6"
           PROJECT_SLUG="python"
@@ -365,23 +368,23 @@ jobs:
             exit 1
           fi
 
-          echo "DEBUG: Using Event ID: $EVENT_ID"
+          echo "Using Event ID: $EVENT_ID"
 
           ISSUE_RESPONSE=$(curl -s \
-            -H "Authorization: Bearer $SENTRY_TOKEN" \
+            -H "Authorization: Bearer ${SENTRY_TOKEN}" \
             "https://us.sentry.io/api/0/projects/$ORG_SLUG/$PROJECT_SLUG/events/$EVENT_ID/")
 
-          echo "Issue API Raw Response:"
+          echo "Raw Response:"
           echo "$ISSUE_RESPONSE"
 
           ISSUE_ID=$(echo "$ISSUE_RESPONSE" | jq -r '.groupID // empty')
 
           if [ -z "$ISSUE_ID" ]; then
-            echo "❌ Failed to retrieve issue ID from Sentry."
+            echo "❌ Issue ID not found"
             exit 1
           fi
 
-          echo "✅ Captured Issue ID: $ISSUE_ID"
+          echo "✅ Issue ID: $ISSUE_ID"
 
           echo "issue_id=$ISSUE_ID" >> $GITHUB_OUTPUT
 
@@ -436,7 +439,7 @@ jobs:
             }"
 
       # ✅ 6. Close Case on Success
-      - name: Close ARIA Case + Resolve Signal
+      - name: Close ARIA Case
         if: steps.run_app.outputs.exit_code == '0'
         env:
           SN_INSTANCE: ${{ secrets.SN_INSTANCE }}
