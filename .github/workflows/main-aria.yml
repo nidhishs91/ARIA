@@ -543,7 +543,6 @@ jobs:
           PROJECT_SLUG="python"
 
           if [ -z "$EVENT_ID" ]; then
-            echo "No Event ID → skipping"
             exit 0
           fi
 
@@ -565,7 +564,7 @@ jobs:
 
           exit 0
 
-      # ✅ 5. Create ARIA Case + Signal (FIXED 🔥)
+      # ✅ 5. Create ARIA Case + Signal
       - name: Create ARIA Case + Signal
         if: steps.run_app.outputs.exit_code != '0'
         env:
@@ -610,8 +609,6 @@ jobs:
 
           CASE_SYS_ID=$(echo "$CASE_RESPONSE" | jq -r '.result.sys_id')
 
-          echo "✅ Case Created: $CASE_SYS_ID"
-
           echo "Creating Signal..."
 
           SIGNAL_PAYLOAD=$(jq -n \
@@ -638,9 +635,7 @@ jobs:
             -u "$SN_USERNAME:$SN_PASSWORD" \
             --data "$SIGNAL_PAYLOAD"
 
-          echo "✅ Signal linked to case"
-
-      # ✅ 6. Close Case (SUCCESS)
+      # ✅ 6. Close Case + Signal
       - name: Close ARIA Case
         if: steps.run_app.outputs.exit_code == '0'
         env:
@@ -649,31 +644,33 @@ jobs:
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
         run: |
 
-          CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
+          CORRELATION_ID="${{ github.workflow }}-${{ github.ref_name }}"
 
           RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
-          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_pipelineid=ARIA_MAIN_PIPELINE^u_case_state=work%20in%20progress&sysparm_limit=1")
+          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID^u_case_state=work%20in%20progress&sysparm_limit=1")
 
           SYS_ID=$(echo "$RESPONSE" | jq -r '.result[0].sys_id // empty')
 
-          if [ -n "$SYS_ID" ]; then
-
-            PAYLOAD=$(jq -n \
-              --arg state "closed" \
-              --arg time "$CURRENT_TIME" \
-              '{u_case_state:$state, u_closed_at:$time}')
-
-            curl -s -X PATCH \
-              "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$SYS_ID" \
-              -H "Content-Type: application/json" \
-              -u "$SN_USERNAME:$SN_PASSWORD" \
-              --data "$PAYLOAD"
-
-            echo "✅ Case Closed"
-
-          else
+          if [ -z "$SYS_ID" ] || [ "$SYS_ID" = "null" ]; then
             echo "No case to close"
+            exit 0
           fi
+
+          echo "✅ Closing ARIA case: $SYS_ID"
+
+          curl -s -X PATCH \
+            "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$SYS_ID" \
+            -H "Content-Type: application/json" \
+            -u "$SN_USERNAME:$SN_PASSWORD" \
+            --data '{"u_case_state":"closed"}'
+
+          echo "✅ Closing signals..."
+
+          curl -s -X PATCH \
+            "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source?sysparm_query=u_case=$SYS_ID" \
+            -H "Content-Type: application/json" \
+            -u "$SN_USERNAME:$SN_PASSWORD" \
+            --data '{"u_status":"resolved"}'
 
       # ✅ 7. Force RED pipeline
       - name: Mark Pipeline Failed
