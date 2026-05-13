@@ -575,7 +575,7 @@ jobs:
 
           SAFE_ERROR=$(echo "$ERROR_MSG" | jq -Rs .)
           CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
-          CORRELATION_ID=$(echo "${{ github.workflow }}-${{ github.ref_name }}" | sed 's/ /%20/g')
+          CORRELATION_ID="ARIA_MAIN_PIPELINE_${{ github.ref_name }}"
           PIPELINE_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           echo "Creating ARIA Case..."
@@ -589,7 +589,7 @@ jobs:
             --arg url "$PIPELINE_URL" \
             --arg issue "${ISSUE_ID:-N/A}" \
             '{
-              u_short_description:$short,
+              u_situation_details:$short,
               u_case_state:$state,
               u_pipelineid:$pipeline,
               u_external_id:$ext,
@@ -641,7 +641,7 @@ jobs:
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
         run: |
 
-          CORRELATION_ID=$(echo "${{ github.workflow }}-${{ github.ref_name }}" | sed 's/ /%20/g')
+          CORRELATION_ID="ARIA_MAIN_PIPELINE_${{ github.ref_name }}"
           CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
 
           echo "Finding open ARIA case..."
