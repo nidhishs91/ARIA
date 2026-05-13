@@ -323,7 +323,7 @@ jobs:
           sudo apt-get install -y jq
           pip install sentry-sdk
 
-      # ✅ 3. Run Application & Capture Sentry Event ID
+      # ✅ 3. Run Application & Capture Event ID
       - name: Run Application
         id: run_app
         continue-on-error: true
@@ -335,7 +335,7 @@ jobs:
 
           echo "$OUTPUT"
 
-          # ✅ FIX: reliable event extraction
+          # ✅ Extract Event ID (matches your Python print)
           EVENT_ID=$(echo "$OUTPUT" | grep "Captured Event ID:" | awk '{print $4}')
 
           echo "Captured Event ID: $EVENT_ID"
@@ -350,7 +350,7 @@ jobs:
 
           exit $EXIT_CODE
 
-      # ✅ 4. Get Sentry Issue ID
+      # ✅ 4. Get Sentry Issue ID (WITH RETRY 🔥)
       - name: Get Sentry Issue ID
         if: steps.run_app.outputs.exit_code != '0'
         id: sentry_issue
@@ -370,23 +370,31 @@ jobs:
 
           echo "Using Event ID: $EVENT_ID"
 
-          ISSUE_RESPONSE=$(curl -s \
-            -H "Authorization: Bearer ${SENTRY_TOKEN}" \
-            "https://us.sentry.io/api/0/projects/$ORG_SLUG/$PROJECT_SLUG/events/$EVENT_ID/")
+          # ✅ Retry mechanism (CRITICAL FIX)
+          for i in {1..10}
+          do
+            echo "Attempt $i..."
 
-          echo "Raw Response:"
-          echo "$ISSUE_RESPONSE"
+            ISSUE_RESPONSE=$(curl -s \
+              -H "Authorization: Bearer ${SENTRY_TOKEN}" \
+              "https://us.sentry.io/api/0/projects/$ORG_SLUG/$PROJECT_SLUG/events/$EVENT_ID/")
 
-          ISSUE_ID=$(echo "$ISSUE_RESPONSE" | jq -r '.groupID // empty')
+            echo "Response: $ISSUE_RESPONSE"
 
-          if [ -z "$ISSUE_ID" ]; then
-            echo "❌ Issue ID not found"
-            exit 1
-          fi
+            ISSUE_ID=$(echo "$ISSUE_RESPONSE" | jq -r '.groupID // empty')
 
-          echo "✅ Issue ID: $ISSUE_ID"
+            if [ -n "$ISSUE_ID" ]; then
+              echo "✅ Issue ID: $ISSUE_ID"
+              echo "issue_id=$ISSUE_ID" >> $GITHUB_OUTPUT
+              exit 0
+            fi
 
-          echo "issue_id=$ISSUE_ID" >> $GITHUB_OUTPUT
+            echo "⏳ Not ready... retrying in 5 sec"
+            sleep 5
+          done
+
+          echo "❌ Failed after retries"
+          exit 1
 
       # ✅ 5. Create ARIA Case + Signal
       - name: Create ARIA Case + Signal
