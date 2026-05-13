@@ -530,10 +530,11 @@ jobs:
 
           exit $EXIT_CODE
 
-      # ✅ 4 Get Sentry Issue ID
+      # ✅ 4 Get Sentry Issue ID (SAFE ✅)
       - name: Get Sentry Issue ID
         if: steps.run_app.outputs.exit_code != '0'
         id: sentry_issue
+        continue-on-error: true   # ✅ IMPORTANT FIX
         env:
           SENTRY_TOKEN: ${{ secrets.SENTRY_TOKEN }}
         run: |
@@ -557,7 +558,8 @@ jobs:
             sleep 5
           done
 
-          exit 1
+          echo "⚠️ Could not fetch Sentry issue (continuing)"
+          exit 0
 
       # ✅ 5 Create / Update ARIA Case (FAIL)
       - name: Create or Update ARIA Case
@@ -629,12 +631,12 @@ jobs:
                 \"u_external_id\": \"$CORRELATION_ID\",
                 \"u_status\": \"active\",
                 \"u_error\": $SAFE_ERROR,
-                \"u_sentry_issue_id\": \"$ISSUE_ID\"
+                \"u_sentry_issue_id\": \"${ISSUE_ID:-N/A}\"
               }"
 
           fi
 
-      # ✅ 6 Close SAME Case (SUCCESS)
+      # ✅ 6 Close SAME Case (SAFE ✅)
       - name: Close ARIA Case
         if: steps.run_app.outputs.exit_code == '0'
         env:
@@ -653,23 +655,22 @@ jobs:
 
           SYS_ID=$(echo "$RESPONSE" | jq -r '.result[0].sys_id // empty')
 
-          if [ -n "$SYS_ID" ]; then
-
-            echo "✅ Closing SAME case: $SYS_ID"
-
-            curl -X PATCH \
-              "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$SYS_ID" \
-              -H "Content-Type: application/json" \
-              -u "${SN_USERNAME}:${SN_PASSWORD}" \
-              --data "{
-                \"u_case_state\": \"closed\",
-                \"u_closed_at\": \"$CURRENT_TIME\",
-                \"u_decision\": \"manual heal\"
-              }"
-
-          else
-            echo "❌ No matching case found"
+          if [ -z "$SYS_ID" ] || [ "$SYS_ID" == "null" ]; then
+            echo "✅ No active case found → safe skip"
+            exit 0
           fi
+
+          echo "✅ Closing SAME case: $SYS_ID"
+
+          curl -X PATCH \
+            "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$SYS_ID" \
+            -H "Content-Type: application/json" \
+            -u "${SN_USERNAME}:${SN_PASSWORD}" \
+            --data "{
+              \"u_case_state\": \"closed\",
+              \"u_closed_at\": \"$CURRENT_TIME\",
+              \"u_decision\": \"manual heal\"
+            }"
 
       # ✅ 7 FORCE RED PIPELINE
       - name: Mark Pipeline Failed
