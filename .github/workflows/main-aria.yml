@@ -530,11 +530,11 @@ jobs:
 
           exit $EXIT_CODE
 
-      # ✅ 4 Get Sentry Issue ID (SAFE ✅)
+      # ✅ 4 Get Sentry Issue ID (SAFE)
       - name: Get Sentry Issue ID
         if: steps.run_app.outputs.exit_code != '0'
         id: sentry_issue
-        continue-on-error: true   # ✅ IMPORTANT FIX
+        continue-on-error: true
         env:
           SENTRY_TOKEN: ${{ secrets.SENTRY_TOKEN }}
         run: |
@@ -558,10 +558,10 @@ jobs:
             sleep 5
           done
 
-          echo "⚠️ Could not fetch Sentry issue (continuing)"
+          echo "⚠️ Sentry issue not found, continuing..."
           exit 0
 
-      # ✅ 5 Create / Update ARIA Case (FAIL)
+      # ✅ 5 Create / Update Case
       - name: Create or Update ARIA Case
         if: steps.run_app.outputs.exit_code != '0'
         env:
@@ -589,54 +589,75 @@ jobs:
 
           if [ -n "$SYS_ID" ]; then
 
-            echo "✅ Updating existing case: $SYS_ID"
+            echo "✅ Updating existing case"
 
-            curl -X PATCH \
+            PAYLOAD=$(jq -n \
+              --arg desc "Build failed" \
+              '{u_situation_details:$desc}')
+
+            curl -s -X PATCH \
               "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$SYS_ID" \
               -H "Content-Type: application/json" \
               -u "${SN_USERNAME}:${SN_PASSWORD}" \
-              --data "{
-                \"u_situation_details\": \"Build failed\"
-              }"
+              --data "$PAYLOAD"
 
           else
 
-            echo "🚀 Creating new case..."
+            echo "🚀 Creating new case"
+
+            PAYLOAD=$(jq -n \
+              --arg short "Pipeline Failed" \
+              --arg state "work in progress" \
+              --arg pipeline "ARIA_MAIN_PIPELINE" \
+              --arg ext "$CORRELATION_ID" \
+              --arg opened "$CURRENT_TIME" \
+              --arg url "$PIPELINE_URL" \
+              '{
+                u_short_description:$short,
+                u_case_state:$state,
+                u_pipelineid:$pipeline,
+                u_external_id:$ext,
+                u_opened_at:$opened,
+                u_caseid:$url
+              }')
 
             CASE_RESPONSE=$(curl -s -X POST \
               "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case" \
               -H "Content-Type: application/json" \
               -u "${SN_USERNAME}:${SN_PASSWORD}" \
-              --data "{
-                \"u_short_description\": \"Pipeline Failed\",
-                \"u_case_state\": \"work in progress\",
-                \"u_pipelineid\": \"ARIA_MAIN_PIPELINE\",
-                \"u_external_id\": \"$CORRELATION_ID\",
-                \"u_opened_at\": \"$CURRENT_TIME\",
-                \"u_caseid\": \"$PIPELINE_URL\"
-              }")
+              --data "$PAYLOAD")
 
             SYS_ID=$(echo "$CASE_RESPONSE" | jq -r '.result.sys_id')
 
             echo "Creating Signal..."
 
+            SIGNAL_PAYLOAD=$(jq -n \
+              --arg case "$SYS_ID" \
+              --arg src "GitHub + Sentry" \
+              --arg type "pipeline failure" \
+              --arg ext "$CORRELATION_ID" \
+              --arg status "active" \
+              --arg err "$ERROR_MSG" \
+              --arg issue "${ISSUE_ID:-N/A}" \
+              '{
+                u_case:$case,
+                u_signal_source:$src,
+                u_signal_type:$type,
+                u_external_id:$ext,
+                u_status:$status,
+                u_error:$err,
+                u_sentry_issue_id:$issue
+              }')
+
             curl -s -X POST \
               "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source" \
               -H "Content-Type: application/json" \
               -u "${SN_USERNAME}:${SN_PASSWORD}" \
-              --data "{
-                \"u_case\": \"$SYS_ID\",
-                \"u_signal_source\": \"GitHub + Sentry\",
-                \"u_signal_type\": \"pipeline failure\",
-                \"u_external_id\": \"$CORRELATION_ID\",
-                \"u_status\": \"active\",
-                \"u_error\": $SAFE_ERROR,
-                \"u_sentry_issue_id\": \"${ISSUE_ID:-N/A}\"
-              }"
+              --data "$SIGNAL_PAYLOAD"
 
           fi
 
-      # ✅ 6 Close SAME Case (SAFE ✅)
+      # ✅ 6 Close Case SAFELY
       - name: Close ARIA Case
         if: steps.run_app.outputs.exit_code == '0'
         env:
@@ -656,21 +677,23 @@ jobs:
           SYS_ID=$(echo "$RESPONSE" | jq -r '.result[0].sys_id // empty')
 
           if [ -z "$SYS_ID" ] || [ "$SYS_ID" == "null" ]; then
-            echo "✅ No active case found → safe skip"
+            echo "✅ No active case found → skipping"
             exit 0
           fi
 
-          echo "✅ Closing SAME case: $SYS_ID"
+          echo "✅ Closing case: $SYS_ID"
 
-          curl -X PATCH \
+          PAYLOAD=$(jq -n \
+            --arg state "closed" \
+            --arg time "$CURRENT_TIME" \
+            --arg decision "manual heal" \
+            '{u_case_state:$state, u_closed_at:$time, u_decision:$decision}')
+
+          curl -s -X PATCH \
             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$SYS_ID" \
             -H "Content-Type: application/json" \
             -u "${SN_USERNAME}:${SN_PASSWORD}" \
-            --data "{
-              \"u_case_state\": \"closed\",
-              \"u_closed_at\": \"$CURRENT_TIME\",
-              \"u_decision\": \"manual heal\"
-            }"
+            --data "$PAYLOAD"
 
       # ✅ 7 FORCE RED PIPELINE
       - name: Mark Pipeline Failed
