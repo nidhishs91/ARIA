@@ -598,7 +598,7 @@ jobs:
               u_pipelineid:$pipeline,
               u_external_id:$ext,
               u_opened_at:$opened,
-              u_caseid:$url,
+              u_u:$url,
               u_sentry_issue_id:$issue
             }')
 
