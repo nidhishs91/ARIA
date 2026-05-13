@@ -41,7 +41,7 @@ try:
     trigger_error()
 except Exception as e:
     event_id = sentry_sdk.capture_exception(e)
-    print("SENTRY_EVENT_ID:", event_id)
+    print("Captured Event ID:", event_id)  # Changed from "SENTRY_EVENT_ID:"
     
     # Write event ID to GitHub Actions output
     if event_id:
