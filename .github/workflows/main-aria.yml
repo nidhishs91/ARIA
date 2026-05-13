@@ -575,8 +575,8 @@ jobs:
 
           SAFE_ERROR=$(echo "$ERROR_MSG" | jq -Rs .)
           CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
-          PIPELINE_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           CORRELATION_ID="${{ github.workflow }}-${{ github.ref_name }}"
+          PIPELINE_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           CASE_PAYLOAD=$(jq -n \
             --arg short "Pipeline Failed" \
@@ -636,15 +636,13 @@ jobs:
           SN_USERNAME: ${{ secrets.SN_USERNAME }}
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
           SENTRY_TOKEN: ${{ secrets.SENTRY_TOKEN }}
-          ORG_SLUG: demo1-i6
         run: |
 
           CORRELATION_ID="${{ github.workflow }}-${{ github.ref_name }}"
           CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
-          ORG_SLUG="demo1-i6"
 
           CASE_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
-          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID%5Eu_case_state=work%20in%20progress&sysparm_limit=1")
+          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID%5Eu_case_state=work%20in%20progress&sysparm_limit=1&sysparm_fields=sys_id,u_sentry_issue_id")
 
           CASE_SYS_ID=$(echo "$CASE_RESPONSE" | jq -r '.result[0].sys_id // empty')
           SENTRY_ID=$(echo "$CASE_RESPONSE" | jq -r '.result[0].u_sentry_issue_id // empty')
@@ -654,7 +652,7 @@ jobs:
             exit 0
           fi
 
-          echo "✅ Closing ARIA case"
+          echo "✅ Closing ARIA case $CASE_SYS_ID"
 
           curl -s -X PATCH \
             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$CASE_SYS_ID" \
@@ -675,18 +673,19 @@ jobs:
               --data '{"u_status":"resolved"}'
           fi
 
-          # ✅ Close Sentry Issue
-          if [ -n "$SENTRY_ID" ] && [ "$SENTRY_ID" != "N/A" ]; then
+          # ✅ Close Sentry Issue safely
+          if [ -n "$SENTRY_ID" ] && [ "$SENTRY_ID" != "null" ] && [ "$SENTRY_ID" != "N/A" ]; then
             echo "Closing Sentry issue $SENTRY_ID"
-            
             curl -s -X PUT \
               -H "Authorization: Bearer $SENTRY_TOKEN" \
               -H "Content-Type: application/json" \
               "https://us.sentry.io/api/0/issues/$SENTRY_ID/" \
               --data '{"status":"resolved"}'
+          else
+            echo "No Sentry issue to close"
           fi
 
-      # ✅ 7. Force pipeline red on failure
+      # ✅ 7. Force RED pipeline on failure
       - name: Mark Pipeline Failed
         if: steps.run_app.outputs.exit_code != '0'
         run: |
