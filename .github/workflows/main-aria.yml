@@ -613,7 +613,6 @@ jobs:
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
         run: |
 
-          CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
           CORRELATION_ID="${{ github.workflow }}-${{ github.ref_name }}"
 
           RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
@@ -628,7 +627,6 @@ jobs:
 
           PAYLOAD=$(jq -n \
             --arg state "closed" \
-            --arg time "$CURRENT_TIME" \
             '{u_case_state:$state, u_closed_at:$time}')
 
           curl -s -X PATCH \
