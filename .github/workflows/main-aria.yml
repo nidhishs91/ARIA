@@ -495,18 +495,18 @@ jobs:
 
     steps:
 
-      # ✅ 1. Checkout Code
+      # ✅ 1 Checkout Code
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ✅ 2. Install Dependencies
+      # ✅ 2 Install Dependencies
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y jq
           pip install sentry-sdk
 
-      # ✅ 3. Run Application
+      # ✅ 3 Run Application
       - name: Run Application
         id: run_app
         continue-on-error: true
@@ -530,7 +530,7 @@ jobs:
 
           exit $EXIT_CODE
 
-      # ✅ 4. Get Sentry Issue ID
+      # ✅ 4 Get Sentry Issue ID
       - name: Get Sentry Issue ID
         if: steps.run_app.outputs.exit_code != '0'
         id: sentry_issue
@@ -559,33 +559,36 @@ jobs:
 
           exit 1
 
-      # ✅ 5. Create OR Update ARIA Case (FAILURE)
+      # ✅ 5 Create OR Update Case (FAIL)
       - name: Create or Update ARIA Case
         if: steps.run_app.outputs.exit_code != '0'
         env:
           ERROR_MSG: ${{ steps.run_app.outputs.error }}
           ISSUE_ID: ${{ steps.sentry_issue.outputs.issue_id }}
-          RUN_ID: ${{ github.run_id }}
           SN_INSTANCE: ${{ secrets.SN_INSTANCE }}
           SN_USERNAME: ${{ secrets.SN_USERNAME }}
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
         run: |
 
           SAFE_ERROR=$(echo "$ERROR_MSG" | jq -Rs .)
+
           CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
+
+          # ✅ FIXED CORRELATION ID (IMPORTANT)
+          CORRELATION_ID="${{ github.workflow }}-${{ github.ref_name }}"
 
           PIPELINE_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           echo "Checking existing case..."
 
           EXISTING=$(curl -s -u "${SN_USERNAME}:${SN_PASSWORD}" \
-          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$RUN_ID^u_case_state=work%20in%20progress&sysparm_limit=1")
+          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID^u_case_state=work%20in%20progress&sysparm_limit=1")
 
           SYS_ID=$(echo "$EXISTING" | jq -r '.result[0].sys_id // empty')
 
           if [ -n "$SYS_ID" ]; then
 
-            echo "✅ Existing case found → updating"
+            echo "✅ Updating existing case"
 
             curl -X PATCH \
               "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$SYS_ID" \
@@ -597,7 +600,7 @@ jobs:
 
           else
 
-            echo "🚀 Creating new ARIA case..."
+            echo "🚀 Creating new case"
 
             CASE_RESPONSE=$(curl -s -X POST \
               "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case" \
@@ -607,7 +610,7 @@ jobs:
                 \"u_short_description\": \"Pipeline Failed\",
                 \"u_case_state\": \"work in progress\",
                 \"u_pipelineid\": \"ARIA_MAIN_PIPELINE\",
-                \"u_external_id\": \"$RUN_ID\",
+                \"u_external_id\": \"$CORRELATION_ID\",
                 \"u_opened_at\": \"$CURRENT_TIME\",
                 \"u_caseid\": \"$PIPELINE_URL\"
               }")
@@ -624,7 +627,7 @@ jobs:
                 \"u_case\": \"$SYS_ID\",
                 \"u_signal_source\": \"GitHub + Sentry\",
                 \"u_signal_type\": \"pipeline failure\",
-                \"u_external_id\": \"$RUN_ID\",
+                \"u_external_id\": \"$CORRELATION_ID\",
                 \"u_status\": \"active\",
                 \"u_error\": $SAFE_ERROR,
                 \"u_sentry_issue_id\": \"$ISSUE_ID\"
@@ -632,11 +635,10 @@ jobs:
 
           fi
 
-      # ✅ 6. Close Case on Success (SAME RECORD ✅)
+      # ✅ 6 Close SAME Case (SUCCESS)
       - name: Close ARIA Case
         if: steps.run_app.outputs.exit_code == '0'
         env:
-          RUN_ID: ${{ github.run_id }}
           SN_INSTANCE: ${{ secrets.SN_INSTANCE }}
           SN_USERNAME: ${{ secrets.SN_USERNAME }}
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
@@ -644,8 +646,10 @@ jobs:
 
           CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
 
+          CORRELATION_ID="${{ github.workflow }}-${{ github.ref_name }}"
+
           RESPONSE=$(curl -s -u "${SN_USERNAME}:${SN_PASSWORD}" \
-          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$RUN_ID^u_case_state=work%20in%20progress&sysparm_limit=1")
+          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID^u_case_state=work%20in%20progress&sysparm_limit=1")
 
           SYS_ID=$(echo "$RESPONSE" | jq -r '.result[0].sys_id // empty')
 
@@ -667,7 +671,7 @@ jobs:
             echo "❌ No matching case found"
           fi
 
-      # ✅ 7. FORCE PIPELINE RED
+      # ✅ 7 FORCE RED PIPELINE
       - name: Mark Pipeline Failed
         if: steps.run_app.outputs.exit_code != '0'
         run: |
