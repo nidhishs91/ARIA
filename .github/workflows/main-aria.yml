@@ -636,6 +636,7 @@ jobs:
           SN_USERNAME: ${{ secrets.SN_USERNAME }}
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
           SENTRY_TOKEN: ${{ secrets.SENTRY_TOKEN }}
+          ORG_SLUG: demo1-i6
         run: |
 
           CORRELATION_ID="${{ github.workflow }}-${{ github.ref_name }}"
