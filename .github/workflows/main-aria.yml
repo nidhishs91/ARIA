@@ -575,7 +575,7 @@ jobs:
 
           SAFE_ERROR=$(echo "$ERROR_MSG" | jq -Rs .)
           CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
-          CORRELATION_ID=$(echo "${{ github.workflow }}-${{ github.ref_name }}" | sed 's/ /%20/g')
+          CORRELATION_ID="ARIA_MAIN_PIPELINE_${{ github.ref_name }}"
           PIPELINE_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           echo "Creating ARIA Case..."
@@ -594,7 +594,7 @@ jobs:
               u_pipelineid:$pipeline,
               u_external_id:$ext,
               u_opened_at:$opened,
-              u_case_url:$url,
+              u_u:$url,
               u_sentry_issue_id:$issue
             }')
 
@@ -641,7 +641,7 @@ jobs:
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
         run: |
 
-          CORRELATION_ID=$(echo "${{ github.workflow }}-${{ github.ref_name }}" | sed 's/ /%20/g')
+          CORRELATION_ID="ARIA_MAIN_PIPELINE_${{ github.ref_name }}"
           CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
 
           echo "Finding open ARIA case..."
@@ -662,7 +662,7 @@ jobs:
             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$CASE_SYS_ID" \
             -H "Content-Type: application/json" \
             -u "$SN_USERNAME:$SN_PASSWORD" \
-            --data "{\"u_case_state\":\"closed\",\"u_closed_at\":\"$CURRENT_TIME\"}"
+            --data "{\"u_case_state\":\"closed\",\"u_closedat\":\"$CURRENT_TIME\",\"u_situation_details\":\"Build Failed\"}"
 
           echo "Resolving related signal..."
 
