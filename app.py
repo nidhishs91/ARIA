@@ -7,7 +7,7 @@ sentry_sdk.init(
 )
 
 def trigger_error():
-    return 10 / 1  # intentional error
+    return 10 / 0  # intentional error
 
 try:
     trigger_error()
