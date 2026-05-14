@@ -396,18 +396,6 @@ jobs:
               --data '{"u_status":"resolved"}'
           fi
 
-          echo "✅ Resolving Sentry issue..."
-
-          if [ -n "$ISSUE_ID" ] && [ "$ISSUE_ID" != "null" ]; then
-            curl -s -X PUT \
-              "https://us.sentry.io/api/0/issues/$ISSUE_ID/" \
-              -H "Authorization: Bearer $SENTRY_TOKEN" \
-              -H "Content-Type: application/json" \
-              --data '{"status":"resolved"}'
-          fi
-
-          echo "✅ All systems resolved ✅"
-
       # ✅ 7. Force pipeline red on failure
       - name: Mark Pipeline Failed
         if: steps.run_app.outputs.exit_code != '0'
