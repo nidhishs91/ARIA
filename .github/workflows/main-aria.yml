@@ -662,7 +662,7 @@ jobs:
             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$CASE_SYS_ID" \
             -H "Content-Type: application/json" \
             -u "$SN_USERNAME:$SN_PASSWORD" \
-            --data "{\"u_case_state\":\"closed\",\"u_closedat\":\"$CURRENT_TIME\",\"u_situation_details\":\"Build Failed\"}"
+            --data "{\"u_case_state\":\"closed\",\"u_closedat\":\"$CURRENT_TIME\",\"u_situation_details\":\"Build Passed\"}"
 
           echo "Resolving related signal..."
 
