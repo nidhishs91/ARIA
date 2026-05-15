@@ -1,3 +1,209 @@
+# name: ARIA Pipeline
+
+# on:
+#   push:
+#     branches:
+#       - main
+#   workflow_dispatch:
+
+# jobs:
+#   aria-flow:
+#     runs-on: ubuntu-latest
+
+#     steps:
+
+#       # ✅ 1. Checkout Code
+#       - name: Checkout code
+#         uses: actions/checkout@v4
+
+#       # ✅ 2. Install Dependencies
+#       - name: Install dependencies
+#         run: |
+#           sudo apt-get update
+#           sudo apt-get install -y jq
+#           pip install sentry-sdk
+
+#       # ✅ 3. Run Application
+#       - name: Run Application
+#         id: run_app
+#         continue-on-error: true
+#         run: |
+#           set +e
+
+#           OUTPUT=$(python app.py 2>&1)
+#           EXIT_CODE=$?
+
+#           echo "$OUTPUT"
+
+#           EVENT_ID=$(echo "$OUTPUT" | grep "Captured Event ID:" | awk '{print $4}')
+#           echo "event_id=$EVENT_ID" >> $GITHUB_OUTPUT
+
+#           echo "error<<EOF" >> $GITHUB_OUTPUT
+#           echo "$OUTPUT" >> $GITHUB_OUTPUT
+#           echo "EOF" >> $GITHUB_OUTPUT
+
+#           echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+#           exit $EXIT_CODE
+
+#       # ✅ 4. Get Sentry Issue ID (only if failed)
+#       - name: Get Sentry Issue ID
+#         if: steps.run_app.outputs.exit_code != '0'
+#         id: sentry_issue
+#         env:
+#           SENTRY_TOKEN: ${{ secrets.SENTRY_TOKEN }}
+#         run: |
+#           EVENT_ID="${{ steps.run_app.outputs.event_id }}"
+#           ORG_SLUG="demo1-i6"
+#           PROJECT_SLUG="python"
+
+#           if [ -z "$EVENT_ID" ]; then
+#             exit 0
+#           fi
+
+#           for i in {1..10}
+#           do
+#             ISSUE_RESPONSE=$(curl -s \
+#               -H "Authorization: Bearer ${SENTRY_TOKEN}" \
+#               "https://us.sentry.io/api/0/projects/$ORG_SLUG/$PROJECT_SLUG/events/$EVENT_ID/")
+
+#             ISSUE_ID=$(echo "$ISSUE_RESPONSE" | jq -r '.groupID // empty')
+
+#             if [ -n "$ISSUE_ID" ]; then
+#               echo "issue_id=$ISSUE_ID" >> $GITHUB_OUTPUT
+#               exit 0
+#             fi
+
+#             sleep 5
+#           done
+
+#           exit 0
+
+#       # ✅ 5. Create ARIA Case + Signal (on failure)
+#       - name: Create ARIA Case + Signal
+#         if: steps.run_app.outputs.exit_code != '0'
+#         env:
+#           ERROR_MSG: ${{ steps.run_app.outputs.error }}
+#           ISSUE_ID: ${{ steps.sentry_issue.outputs.issue_id }}
+#           SN_INSTANCE: ${{ secrets.SN_INSTANCE }}
+#           SN_USERNAME: ${{ secrets.SN_USERNAME }}
+#           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
+#         run: |
+
+#           SAFE_ERROR=$(echo "$ERROR_MSG" | jq -Rs .)
+#           CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
+#           CORRELATION_ID="ARIA_MAIN_PIPELINE_${{ github.ref_name }}"
+#           PIPELINE_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+#           echo "Creating ARIA Case..."
+
+#           CASE_PAYLOAD=$(jq -n \
+#             --arg short "Pipeline Failed" \
+#             --arg state "work in progress" \
+#             --arg pipeline "ARIA_MAIN_PIPELINE" \
+#             --arg ext "$CORRELATION_ID" \
+#             --arg opened "$CURRENT_TIME" \
+#             --arg url "$PIPELINE_URL" \
+#             --arg issue "${ISSUE_ID:-N/A}" \
+#             '{
+#               u_situation_details:$short,
+#               u_case_state:$state,
+#               u_pipelineid:$pipeline,
+#               u_external_id:$ext,
+#               u_opened_at:$opened,
+#               u_u:$url,
+#               u_sentry_issue_id:$issue
+#             }')
+
+#           CASE_RESPONSE=$(curl -s -X POST \
+#             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case" \
+#             -H "Content-Type: application/json" \
+#             -u "$SN_USERNAME:$SN_PASSWORD" \
+#             --data "$CASE_PAYLOAD")
+
+#           CASE_SYS_ID=$(echo "$CASE_RESPONSE" | jq -r '.result.sys_id')
+
+#           echo "Creating Signal..."
+
+#           SIGNAL_PAYLOAD=$(jq -n \
+#             --arg case "$CASE_SYS_ID" \
+#             --arg src "GitHub + Sentry" \
+#             --arg type "pipeline failure" \
+#             --arg ext "$CORRELATION_ID" \
+#             --arg status "active" \
+#             --arg err "$ERROR_MSG" \
+#             --arg issue "${ISSUE_ID:-N/A}" \
+#             '{
+#               u_case:$case,
+#               u_signal_source:$src,
+#               u_signal_type:$type,
+#               u_external_id:$ext,
+#               u_status:$status,
+#               u_error:$err,
+#               u_sentry_issue_id:$issue
+#             }')
+
+#           curl -s -X POST \
+#             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source" \
+#             -H "Content-Type: application/json" \
+#             -u "$SN_USERNAME:$SN_PASSWORD" \
+#             --data "$SIGNAL_PAYLOAD"
+
+#       # ✅ 6. Close ARIA Case + Signal (on success)
+#       - name: Close ARIA Case + Signal
+#         if: steps.run_app.outputs.exit_code == '0'
+#         env:
+#           SN_INSTANCE: ${{ secrets.SN_INSTANCE }}
+#           SN_USERNAME: ${{ secrets.SN_USERNAME }}
+#           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
+#         run: |
+
+#           CORRELATION_ID="ARIA_MAIN_PIPELINE_${{ github.ref_name }}"
+#           CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
+
+#           echo "Finding open ARIA case..."
+
+#           CASE_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
+#           "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID%5Eu_case_state=work%20in%20progress&sysparm_limit=1&sysparm_fields=sys_id")
+
+#           CASE_SYS_ID=$(echo "$CASE_RESPONSE" | jq -r '.result[0].sys_id // empty')
+
+#           if [ -z "$CASE_SYS_ID" ] || [ "$CASE_SYS_ID" = "null" ]; then
+#             echo "No open ARIA case found."
+#             exit 0
+#           fi
+
+#           echo "✅ Closing ARIA case $CASE_SYS_ID"
+
+#           curl -s -X PATCH \
+#             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$CASE_SYS_ID" \
+#             -H "Content-Type: application/json" \
+#             -u "$SN_USERNAME:$SN_PASSWORD" \
+#             --data "{\"u_case_state\":\"closed\",\"u_closedat\":\"$CURRENT_TIME\",\"u_situation_details\":\"Build Passed\"}"
+
+#           echo "Resolving related signal..."
+
+#           SIGNAL_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
+#           "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source?sysparm_query=u_case=$CASE_SYS_ID%5Eu_status=active&sysparm_limit=1&sysparm_fields=sys_id")
+
+#           SIGNAL_SYS_ID=$(echo "$SIGNAL_RESPONSE" | jq -r '.result[0].sys_id // empty')
+
+#           if [ -n "$SIGNAL_SYS_ID" ] && [ "$SIGNAL_SYS_ID" != "null" ]; then
+#             curl -s -X PATCH \
+#               "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source/$SIGNAL_SYS_ID" \
+#               -H "Content-Type: application/json" \
+#               -u "$SN_USERNAME:$SN_PASSWORD" \
+#               --data '{"u_status":"resolved"}'
+#           fi
+
+#           echo "✅ ARIA case and signal closed successfully."
+
+#       # ✅ 7. Force pipeline red on failure
+#       - name: Mark Pipeline Failed
+#         if: steps.run_app.outputs.exit_code != '0'
+#         run: |
+#           exit 1
+
 name: ARIA Pipeline
 
 on:
@@ -12,31 +218,26 @@ jobs:
 
     steps:
 
-      # ✅ 1. Checkout Code
+      # ✅ Checkout
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ✅ 2. Install Dependencies
+      # ✅ Install Dependencies
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y jq
-          pip install sentry-sdk
 
-      # ✅ 3. Run Application
+      # ✅ Run Application
       - name: Run Application
         id: run_app
         continue-on-error: true
         run: |
           set +e
-
           OUTPUT=$(python app.py 2>&1)
           EXIT_CODE=$?
 
           echo "$OUTPUT"
-
-          EVENT_ID=$(echo "$OUTPUT" | grep "Captured Event ID:" | awk '{print $4}')
-          echo "event_id=$EVENT_ID" >> $GITHUB_OUTPUT
 
           echo "error<<EOF" >> $GITHUB_OUTPUT
           echo "$OUTPUT" >> $GITHUB_OUTPUT
@@ -46,111 +247,75 @@ jobs:
 
           exit $EXIT_CODE
 
-      # ✅ 4. Get Sentry Issue ID (only if failed)
-      - name: Get Sentry Issue ID
-        if: steps.run_app.outputs.exit_code != '0'
-        id: sentry_issue
-        env:
-          SENTRY_TOKEN: ${{ secrets.SENTRY_TOKEN }}
-        run: |
-          EVENT_ID="${{ steps.run_app.outputs.event_id }}"
-          ORG_SLUG="demo1-i6"
-          PROJECT_SLUG="python"
-
-          if [ -z "$EVENT_ID" ]; then
-            exit 0
-          fi
-
-          for i in {1..10}
-          do
-            ISSUE_RESPONSE=$(curl -s \
-              -H "Authorization: Bearer ${SENTRY_TOKEN}" \
-              "https://us.sentry.io/api/0/projects/$ORG_SLUG/$PROJECT_SLUG/events/$EVENT_ID/")
-
-            ISSUE_ID=$(echo "$ISSUE_RESPONSE" | jq -r '.groupID // empty')
-
-            if [ -n "$ISSUE_ID" ]; then
-              echo "issue_id=$ISSUE_ID" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-
-            sleep 5
-          done
-
-          exit 0
-
-      # ✅ 5. Create ARIA Case + Signal (on failure)
-      - name: Create ARIA Case + Signal
+      # ✅ Handle Failure (Create or Update Case)
+      - name: Create or Update ARIA Case
         if: steps.run_app.outputs.exit_code != '0'
         env:
           ERROR_MSG: ${{ steps.run_app.outputs.error }}
-          ISSUE_ID: ${{ steps.sentry_issue.outputs.issue_id }}
           SN_INSTANCE: ${{ secrets.SN_INSTANCE }}
           SN_USERNAME: ${{ secrets.SN_USERNAME }}
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
         run: |
 
-          SAFE_ERROR=$(echo "$ERROR_MSG" | jq -Rs .)
-          CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
           CORRELATION_ID="ARIA_MAIN_PIPELINE_${{ github.ref_name }}"
+          CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
           PIPELINE_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          echo "Creating ARIA Case..."
+          echo "Checking for existing case..."
 
-          CASE_PAYLOAD=$(jq -n \
-            --arg short "Pipeline Failed" \
-            --arg state "work in progress" \
-            --arg pipeline "ARIA_MAIN_PIPELINE" \
-            --arg ext "$CORRELATION_ID" \
-            --arg opened "$CURRENT_TIME" \
-            --arg url "$PIPELINE_URL" \
-            --arg issue "${ISSUE_ID:-N/A}" \
-            '{
-              u_situation_details:$short,
-              u_case_state:$state,
-              u_pipelineid:$pipeline,
-              u_external_id:$ext,
-              u_opened_at:$opened,
-              u_u:$url,
-              u_sentry_issue_id:$issue
-            }')
+          CASE_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
+          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID&sysparm_limit=1")
 
-          CASE_RESPONSE=$(curl -s -X POST \
-            "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case" \
-            -H "Content-Type: application/json" \
-            -u "$SN_USERNAME:$SN_PASSWORD" \
-            --data "$CASE_PAYLOAD")
+          CASE_SYS_ID=$(echo "$CASE_RESPONSE" | jq -r '.result[0].sys_id // empty')
 
-          CASE_SYS_ID=$(echo "$CASE_RESPONSE" | jq -r '.result.sys_id')
+          if [ -z "$CASE_SYS_ID" ]; then
 
-          echo "Creating Signal..."
+            echo "Creating new ARIA case..."
 
-          SIGNAL_PAYLOAD=$(jq -n \
-            --arg case "$CASE_SYS_ID" \
-            --arg src "GitHub + Sentry" \
-            --arg type "pipeline failure" \
-            --arg ext "$CORRELATION_ID" \
-            --arg status "active" \
-            --arg err "$ERROR_MSG" \
-            --arg issue "${ISSUE_ID:-N/A}" \
-            '{
-              u_case:$case,
-              u_signal_source:$src,
-              u_signal_type:$type,
-              u_external_id:$ext,
-              u_status:$status,
-              u_error:$err,
-              u_sentry_issue_id:$issue
-            }')
+            CASE_PAYLOAD=$(jq -n \
+              --arg state "work in progress" \
+              --arg ext "$CORRELATION_ID" \
+              --arg opened "$CURRENT_TIME" \
+              --arg url "$PIPELINE_URL" \
+              --arg err "$ERROR_MSG" \
+              '{
+                u_case_state:$state,
+                u_external_id:$ext,
+                u_opened_at:$opened,
+                u_case_url:$url,
+                u_situation_details:$err
+              }')
 
-          curl -s -X POST \
-            "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source" \
-            -H "Content-Type: application/json" \
-            -u "$SN_USERNAME:$SN_PASSWORD" \
-            --data "$SIGNAL_PAYLOAD"
+            CASE_RESPONSE=$(curl -s -X POST \
+              "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case" \
+              -H "Content-Type: application/json" \
+              -u "$SN_USERNAME:$SN_PASSWORD" \
+              --data "$CASE_PAYLOAD")
 
-      # ✅ 6. Close ARIA Case + Signal (on success)
-      - name: Close ARIA Case + Signal
+            CASE_SYS_ID=$(echo "$CASE_RESPONSE" | jq -r '.result.sys_id')
+
+            echo "Creating Signal..."
+
+            curl -s -X POST \
+              "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source" \
+              -H "Content-Type: application/json" \
+              -u "$SN_USERNAME:$SN_PASSWORD" \
+              --data "{\"u_case\":\"$CASE_SYS_ID\",\"u_status\":\"active\",\"u_error\":$(echo "$ERROR_MSG" | jq -Rs .)}"
+
+          else
+
+            echo "Updating existing case → Monitoring..."
+
+            curl -s -X PATCH \
+              "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$CASE_SYS_ID" \
+              -H "Content-Type: application/json" \
+              -u "$SN_USERNAME:$SN_PASSWORD" \
+              --data "{\"u_case_state\":\"monitoring\",\"u_situation_details\":$(echo "$ERROR_MSG" | jq -Rs .)}"
+
+          fi
+
+      # ✅ Handle Success
+      - name: Close ARIA Case
         if: steps.run_app.outputs.exit_code == '0'
         env:
           SN_INSTANCE: ${{ secrets.SN_INSTANCE }}
@@ -161,45 +326,39 @@ jobs:
           CORRELATION_ID="ARIA_MAIN_PIPELINE_${{ github.ref_name }}"
           CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
 
-          echo "Finding open ARIA case..."
-
           CASE_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
-          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID%5Eu_case_state=work%20in%20progress&sysparm_limit=1&sysparm_fields=sys_id")
+          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID^u_case_state!=closed&sysparm_limit=1")
 
           CASE_SYS_ID=$(echo "$CASE_RESPONSE" | jq -r '.result[0].sys_id // empty')
 
-          if [ -z "$CASE_SYS_ID" ] || [ "$CASE_SYS_ID" = "null" ]; then
-            echo "No open ARIA case found."
-            exit 0
-          fi
+          if [ -n "$CASE_SYS_ID" ]; then
 
-          echo "✅ Closing ARIA case $CASE_SYS_ID"
+            echo "Closing case..."
 
-          curl -s -X PATCH \
-            "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$CASE_SYS_ID" \
-            -H "Content-Type: application/json" \
-            -u "$SN_USERNAME:$SN_PASSWORD" \
-            --data "{\"u_case_state\":\"closed\",\"u_closedat\":\"$CURRENT_TIME\",\"u_situation_details\":\"Build Passed\"}"
-
-          echo "Resolving related signal..."
-
-          SIGNAL_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
-          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source?sysparm_query=u_case=$CASE_SYS_ID%5Eu_status=active&sysparm_limit=1&sysparm_fields=sys_id")
-
-          SIGNAL_SYS_ID=$(echo "$SIGNAL_RESPONSE" | jq -r '.result[0].sys_id // empty')
-
-          if [ -n "$SIGNAL_SYS_ID" ] && [ "$SIGNAL_SYS_ID" != "null" ]; then
             curl -s -X PATCH \
-              "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source/$SIGNAL_SYS_ID" \
+              "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$CASE_SYS_ID" \
               -H "Content-Type: application/json" \
               -u "$SN_USERNAME:$SN_PASSWORD" \
-              --data '{"u_status":"resolved"}'
+              --data "{\"u_case_state\":\"closed\",\"u_closedat\":\"$CURRENT_TIME\",\"u_situation_details\":\"Pipeline successful\"}"
+
+            echo "Resolving signal..."
+
+            SIGNAL_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
+            "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source?sysparm_query=u_case=$CASE_SYS_ID^u_status=active&sysparm_limit=1")
+
+            SIGNAL_SYS_ID=$(echo "$SIGNAL_RESPONSE" | jq -r '.result[0].sys_id // empty')
+
+            if [ -n "$SIGNAL_SYS_ID" ]; then
+              curl -s -X PATCH \
+                "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source/$SIGNAL_SYS_ID" \
+                -H "Content-Type: application/json" \
+                -u "$SN_USERNAME:$SN_PASSWORD" \
+                --data '{"u_status":"resolved"}'
+            fi
+
           fi
 
-          echo "✅ ARIA case and signal closed successfully."
-
-      # ✅ 7. Force pipeline red on failure
+      # ✅ Force RED if failure
       - name: Mark Pipeline Failed
         if: steps.run_app.outputs.exit_code != '0'
-        run: |
-          exit 1
+        run: exit 1
