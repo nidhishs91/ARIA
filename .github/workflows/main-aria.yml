@@ -257,7 +257,7 @@ jobs:
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
         run: |
 
-          CORRELATION_ID="ARIA_MAIN_PIPELINE_${{ github.ref_name }}"
+          CORRELATION_ID="ARIA_MAIN1_PIPELINE_${{ github.ref_name }}"
           CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
           PIPELINE_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
@@ -323,7 +323,7 @@ jobs:
           SN_PASSWORD: ${{ secrets.SN_PASSWORD }}
         run: |
 
-          CORRELATION_ID="ARIA_MAIN_PIPELINE_${{ github.ref_name }}"
+          CORRELATION_ID="ARIA_MAIN1_PIPELINE_${{ github.ref_name }}"
           CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
 
           CASE_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
