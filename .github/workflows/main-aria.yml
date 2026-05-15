@@ -28,6 +28,7 @@ jobs:
         continue-on-error: true
         run: |
           set +e
+
           OUTPUT=$(python app.py 2>&1)
           EXIT_CODE=$?
 
@@ -41,7 +42,7 @@ jobs:
 
           exit $EXIT_CODE
 
-      # ✅ Handle Failure (Create or Update Case + Signal)
+      # ✅ Handle Failure
       - name: Create or Update ARIA Case
         if: steps.run_app.outputs.exit_code != '0'
         env:
@@ -56,7 +57,7 @@ jobs:
           PIPELINE_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           GITHUB_RUN_ID="${{ github.run_id }}"
 
-          echo "Checking for existing case..."
+          echo "Checking for existing ARIA case..."
 
           CASE_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
           "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID&sysparm_limit=1&sysparm_fields=sys_id")
@@ -72,11 +73,13 @@ jobs:
               --arg ext "$CORRELATION_ID" \
               --arg opened "$CURRENT_TIME" \
               --arg url "$PIPELINE_URL" \
-              --arg desc "GitHub Pipeline Failure on branch ${{ github.ref_name }}" \
+              --arg desc "GitHub Pipeline Failure - branch ${{ github.ref_name }}" \
+              --arg pipeline "ARIA_MAIN1_PIPELINE" \
               '{
                 u_case_state:$state,
                 u_external_id:$ext,
                 u_opened_at:$opened,
+                u_pipelineid:$pipeline,
                 u_u:$url,
                 u_situation_details:$desc
               }')
@@ -89,7 +92,7 @@ jobs:
 
             CASE_SYS_ID=$(echo "$CASE_RESPONSE" | jq -r '.result.sys_id')
 
-            echo "Creating Signal..."
+            echo "Creating Signal record..."
 
             curl -s -X POST \
               "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source" \
@@ -121,7 +124,7 @@ jobs:
               -u "$SN_USERNAME:$SN_PASSWORD" \
               --data '{"u_case_state":"monitoring","u_situation_details":"Pipeline still failing - monitoring"}'
 
-            echo "Updating existing active signal..."
+            echo "Updating existing signal error..."
 
             SIGNAL_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source?sysparm_query=u_case=$CASE_SYS_ID%5Eu_status=active&sysparm_limit=1&sysparm_fields=sys_id")
@@ -150,7 +153,7 @@ jobs:
 
           fi
 
-      # ✅ Handle Success (Close Case + Resolve Signal)
+      # ✅ Handle Success
       - name: Close ARIA Case
         if: steps.run_app.outputs.exit_code == '0'
         env:
@@ -177,7 +180,7 @@ jobs:
               -u "$SN_USERNAME:$SN_PASSWORD" \
               --data "{\"u_case_state\":\"closed\",\"u_closedat\":\"$CURRENT_TIME\",\"u_situation_details\":\"Pipeline successful\"}"
 
-            echo "Resolving signal..."
+            echo "Resolving active signal..."
 
             SIGNAL_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source?sysparm_query=u_case=$CASE_SYS_ID%5Eu_status=active&sysparm_limit=1&sysparm_fields=sys_id")
