@@ -16,8 +16,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # ✅ Install Dependencies
-      - name: Install dependencies
+      # ✅ Install jq
+      - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y jq
@@ -41,7 +41,7 @@ jobs:
 
           exit $EXIT_CODE
 
-      # ✅ Handle Failure
+      # ✅ Handle Failure (Create or Update Case + Signal)
       - name: Create or Update ARIA Case
         if: steps.run_app.outputs.exit_code != '0'
         env:
@@ -59,7 +59,7 @@ jobs:
           echo "Checking for existing case..."
 
           CASE_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
-          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID&sysparm_limit=1")
+          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID&sysparm_limit=1&sysparm_fields=sys_id")
 
           CASE_SYS_ID=$(echo "$CASE_RESPONSE" | jq -r '.result[0].sys_id // empty')
 
@@ -72,7 +72,7 @@ jobs:
               --arg ext "$CORRELATION_ID" \
               --arg opened "$CURRENT_TIME" \
               --arg url "$PIPELINE_URL" \
-              --arg desc "GitHub Pipeline" \
+              --arg desc "GitHub Pipeline Failure on branch ${{ github.ref_name }}" \
               '{
                 u_case_state:$state,
                 u_external_id:$ext,
@@ -91,27 +91,25 @@ jobs:
 
             echo "Creating Signal..."
 
-            SIGNAL_PAYLOAD=$(jq -n \
-              --arg case_id "$CASE_SYS_ID" \
-              --arg src "GitHub" \
-              --arg type "pipeline failure" \
-              --arg ext "$GITHUB_RUN_ID" \
-              --arg status "active" \
-              --arg err "$ERROR_MSG" \
-              '{
-                u_case:$case_id,
-                u_signal_source:$src,
-                u_signal_type:$type,
-                u_external_id:$ext,
-                u_status:$status,
-                u_error:$err
-              }')
-
             curl -s -X POST \
               "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source" \
               -H "Content-Type: application/json" \
               -u "$SN_USERNAME:$SN_PASSWORD" \
-              --data "$SIGNAL_PAYLOAD"
+              --data "$(jq -n \
+                --arg case_id "$CASE_SYS_ID" \
+                --arg src "GitHub" \
+                --arg type "pipeline failure" \
+                --arg ext "$GITHUB_RUN_ID" \
+                --arg status "active" \
+                --arg err "$ERROR_MSG" \
+                '{
+                  u_case:$case_id,
+                  u_signal_source:$src,
+                  u_signal_type:$type,
+                  u_external_id:$ext,
+                  u_status:$status,
+                  u_error:$err
+                }')"
 
           else
 
@@ -121,12 +119,12 @@ jobs:
               "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$CASE_SYS_ID" \
               -H "Content-Type: application/json" \
               -u "$SN_USERNAME:$SN_PASSWORD" \
-              --data '{"u_case_state":"monitoring","u_situation_details":"Pipeline still failing - under monitoring"}'
+              --data '{"u_case_state":"monitoring","u_situation_details":"Pipeline still failing - monitoring"}'
 
-            echo "Updating signal error..."
+            echo "Updating existing active signal..."
 
             SIGNAL_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
-            "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source?sysparm_query=u_case=$CASE_SYS_ID%5Eu_status=active&sysparm_limit=1")
+            "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source?sysparm_query=u_case=$CASE_SYS_ID%5Eu_status=active&sysparm_limit=1&sysparm_fields=sys_id")
 
             SIGNAL_SYS_ID=$(echo "$SIGNAL_RESPONSE" | jq -r '.result[0].sys_id // empty')
 
@@ -135,12 +133,24 @@ jobs:
                 "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source/$SIGNAL_SYS_ID" \
                 -H "Content-Type: application/json" \
                 -u "$SN_USERNAME:$SN_PASSWORD" \
-                --data "{\"u_error\":$(echo "$ERROR_MSG" | jq -Rs .)}"
+                --data "$(jq -n \
+                  --arg src "GitHub" \
+                  --arg type "pipeline failure" \
+                  --arg ext "$GITHUB_RUN_ID" \
+                  --arg status "active" \
+                  --arg err "$ERROR_MSG" \
+                  '{
+                    u_signal_source:$src,
+                    u_signal_type:$type,
+                    u_external_id:$ext,
+                    u_status:$status,
+                    u_error:$err
+                  }')"
             fi
 
           fi
 
-      # ✅ Handle Success
+      # ✅ Handle Success (Close Case + Resolve Signal)
       - name: Close ARIA Case
         if: steps.run_app.outputs.exit_code == '0'
         env:
@@ -153,11 +163,13 @@ jobs:
           CURRENT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
 
           CASE_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
-          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID%5Eu_case_state!=closed&sysparm_limit=1")
+          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID%5Eu_case_state!=closed&sysparm_limit=1&sysparm_fields=sys_id")
 
           CASE_SYS_ID=$(echo "$CASE_RESPONSE" | jq -r '.result[0].sys_id // empty')
 
           if [ -n "$CASE_SYS_ID" ]; then
+
+            echo "Closing ARIA case..."
 
             curl -s -X PATCH \
               "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$CASE_SYS_ID" \
@@ -165,8 +177,10 @@ jobs:
               -u "$SN_USERNAME:$SN_PASSWORD" \
               --data "{\"u_case_state\":\"closed\",\"u_closedat\":\"$CURRENT_TIME\",\"u_situation_details\":\"Pipeline successful\"}"
 
+            echo "Resolving signal..."
+
             SIGNAL_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
-            "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source?sysparm_query=u_case=$CASE_SYS_ID%5Eu_status=active&sysparm_limit=1")
+            "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source?sysparm_query=u_case=$CASE_SYS_ID%5Eu_status=active&sysparm_limit=1&sysparm_fields=sys_id")
 
             SIGNAL_SYS_ID=$(echo "$SIGNAL_RESPONSE" | jq -r '.result[0].sys_id // empty')
 
@@ -180,7 +194,7 @@ jobs:
 
           fi
 
-      # ✅ Force RED
+      # ✅ Force RED on failure
       - name: Mark Pipeline Failed
         if: steps.run_app.outputs.exit_code != '0'
         run: exit 1
