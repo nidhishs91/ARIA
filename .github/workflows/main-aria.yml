@@ -57,10 +57,10 @@ jobs:
           PIPELINE_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           GITHUB_RUN_ID="${{ github.run_id }}"
 
-          echo "Checking for existing ARIA case..."
+          echo "Checking for open ARIA case..."
 
           CASE_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
-          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID&sysparm_limit=1&sysparm_fields=sys_id")
+          "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case?sysparm_query=u_external_id=$CORRELATION_ID%5Eu_case_state!=closed&sysparm_limit=1&sysparm_fields=sys_id")
 
           CASE_SYS_ID=$(echo "$CASE_RESPONSE" | jq -r '.result[0].sys_id // empty')
 
@@ -124,9 +124,21 @@ jobs:
               "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$CASE_SYS_ID" \
               -H "Content-Type: application/json" \
               -u "$SN_USERNAME:$SN_PASSWORD" \
-              --data '{"u_case_state":"monitoring","u_situation_summary":"Pipeline still failing","u_situation_details":"Pipeline still failing - monitoring"}'
+              --data "$(jq -n \
+                --arg state "monitoring" \
+                --arg url "$PIPELINE_URL" \
+                --arg pipeline "ARIA_MAIN1_PIPELINE" \
+                --arg short "Pipeline still failing" \
+                --arg desc "Pipeline still failing - monitoring" \
+                '{
+                  u_case_state:$state,
+                  u_pipelineid:$pipeline,
+                  u_u:$url,
+                  u_situation_summary:$short,
+                  u_situation_details:$desc
+                }')"
 
-            echo "Updating existing active signal..."
+            echo "Updating active signal..."
 
             SIGNAL_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source?sysparm_query=u_case=$CASE_SYS_ID%5Eu_status=active&sysparm_limit=1&sysparm_fields=sys_id")
