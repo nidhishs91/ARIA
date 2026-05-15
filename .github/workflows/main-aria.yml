@@ -73,7 +73,8 @@ jobs:
               --arg ext "$CORRELATION_ID" \
               --arg opened "$CURRENT_TIME" \
               --arg url "$PIPELINE_URL" \
-              --arg desc "GitHub Pipeline Failure - branch ${{ github.ref_name }}" \
+              --arg short "GitHub Pipeline Failure - ${{ github.ref_name }}" \
+              --arg desc "Pipeline execution failed. See related signal for detailed error." \
               --arg pipeline "ARIA_MAIN1_PIPELINE" \
               '{
                 u_case_state:$state,
@@ -81,6 +82,7 @@ jobs:
                 u_opened_at:$opened,
                 u_pipelineid:$pipeline,
                 u_u:$url,
+                u_situation_summary:$short,
                 u_situation_details:$desc
               }')
 
@@ -122,9 +124,9 @@ jobs:
               "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$CASE_SYS_ID" \
               -H "Content-Type: application/json" \
               -u "$SN_USERNAME:$SN_PASSWORD" \
-              --data '{"u_case_state":"monitoring","u_situation_details":"Pipeline still failing - monitoring"}'
+              --data '{"u_case_state":"monitoring","u_situation_summary":"Pipeline still failing","u_situation_details":"Pipeline still failing - monitoring"}'
 
-            echo "Updating existing signal error..."
+            echo "Updating existing active signal..."
 
             SIGNAL_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source?sysparm_query=u_case=$CASE_SYS_ID%5Eu_status=active&sysparm_limit=1&sysparm_fields=sys_id")
@@ -178,9 +180,9 @@ jobs:
               "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_case/$CASE_SYS_ID" \
               -H "Content-Type: application/json" \
               -u "$SN_USERNAME:$SN_PASSWORD" \
-              --data "{\"u_case_state\":\"closed\",\"u_closedat\":\"$CURRENT_TIME\",\"u_situation_details\":\"Pipeline successful\"}"
+              --data "{\"u_case_state\":\"closed\",\"u_closedat\":\"$CURRENT_TIME\",\"u_situation_summary\":\"Pipeline successful\",\"u_situation_details\":\"Pipeline execution completed successfully.\"}"
 
-            echo "Resolving active signal..."
+            echo "Resolving signal..."
 
             SIGNAL_RESPONSE=$(curl -s -u "$SN_USERNAME:$SN_PASSWORD" \
             "https://${SN_INSTANCE}.service-now.com/api/now/table/u_aria_signal_source?sysparm_query=u_case=$CASE_SYS_ID%5Eu_status=active&sysparm_limit=1&sysparm_fields=sys_id")
